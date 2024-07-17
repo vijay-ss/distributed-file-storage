@@ -1,15 +1,17 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"io/ioutil"
 	"log"
 	"time"
-
 	"github.com/vijay-ss/distributed-file-storage/p2p"
 )
 
-func main() {
+func makeServer(listenAddr string, nodes ...string) *FileServer {
 	tcpTransportOpts := p2p.TCPTransportOpts{
-		ListenAddr: ":3000",
+		ListenAddr: listenAddr,
 		HandshakeFunc: p2p.NOPHandshakeFunc,
 		Decoder: p2p.DefaultDecoder{},
 		//  TODO: onPeer func
@@ -18,19 +20,50 @@ func main() {
 	tcpTransport := p2p.NewTCPTransport(tcpTransportOpts)
 
 	fileServerOpts := FileServerOpts{
-		StorageRoot: "3000_network",
+		EncKey: newEncryptionKey(),
+		StorageRoot: listenAddr + "_network",
 		PathTransfromFunc: CASPathTransformFunc,
 		Transport: tcpTransport,
+		BootstrapNodes: nodes,
 	}
 
 	s := NewFileServer(fileServerOpts)
 
+	tcpTransport.OnPeer = s.OnPeer
+
+	return s
+}
+
+func main() {
+	s1 := makeServer(":3000", "")
+	s2 := makeServer(":4000", ":3000")
+	
 	go func() {
-		time.Sleep(time.Second * 3)
-		s.Stop()
+		log.Fatal(s1.Start())
 	}()
 
-	if err := s.Start(); err != nil {
+	time.Sleep(2 * time.Second)
+
+	go s2.Start()
+	time.Sleep(2 * time.Second)
+ 
+	key := "coolPicture.jpg"
+	data := bytes.NewReader([]byte("my big data file here!"))
+	s2.Store(key, data)
+
+	if err := s2.store.Delete(""); err != nil {
 		log.Fatal(err)
 	}
+
+	r, err := s2.Get(key)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	b, err := ioutil.ReadAll(r)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(string(b))
 }
